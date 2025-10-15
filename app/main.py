@@ -1,29 +1,94 @@
-
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 from dotenv import load_dotenv
+
+# Proveedores de LangChain
 from langchain_openai import ChatOpenAI
-
-
+from langchain_community.chat_models import ChatOllama
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.router import make_router
 from app.agents.products import make_products_agent
 from app.memory import get_message_history
 
+# =========================
+# Config & utilidades
+# =========================
 load_dotenv()
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
+DEFAULT_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()  # openai | ollama | gemini
+DEFAULT_MODEL = os.getenv("MODEL_NAME", "gpt-4o-mini")          # por proveedor
+DEFAULT_TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0"))
+
+# (Opcional) URLs/keys por proveedor
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # requerido si usas gemini
+
+# =========================
+# Fábrica de LLMs
+# =========================
+def make_llm(
+    provider: str,
+    model: str,
+    temperature: float
+):
+    provider = (provider or DEFAULT_PROVIDER).lower()
+
+    if provider == "openai":
+        # Requiere: OPENAI_API_KEY
+        return ChatOpenAI(model=model, temperature=temperature)
+
+    if provider == "ollama":
+        # Requiere: Ollama corriendo localmente o remoto
+        # Modelos típicos: "llama3.1", "qwen2.5", "phi3", etc.
+        return ChatOllama(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
+
+    if provider == "gemini":
+        # Requiere: GOOGLE_API_KEY
+        if not GOOGLE_API_KEY:
+            raise RuntimeError("Falta GOOGLE_API_KEY para usar Gemini.")
+        return ChatGoogleGenerativeAI(model=model, temperature=temperature, google_api_key=GOOGLE_API_KEY)
+
+    raise ValueError(f"Proveedor LLM no soportado: {provider}. Usa: openai | ollama | gemini")
+
+def build_runtime(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None
+):
+    """Crea (llm, router_chain, router_summary, router_with_mem, products_agent_obj) con el proveedor indicado."""
+    use_provider = (provider or DEFAULT_PROVIDER).lower()
+    use_model = model or DEFAULT_MODEL
+    use_temperature = float(temperature if temperature is not None else DEFAULT_TEMPERATURE)
+
+    llm = make_llm(use_provider, use_model, use_temperature)
+
+    router_chain, router_summary, router_with_mem = make_router(llm)
+    products_agent_obj = make_products_agent(llm, hybrid=True)
+
+    return {
+        "provider": use_provider,
+        "model": use_model,
+        "temperature": use_temperature,
+        "llm": llm,
+        "router_chain": router_chain,
+        "router_summary": router_summary,
+        "router_with_mem": router_with_mem,
+        "products_agent_obj": products_agent_obj,
+    }
+
+# =========================
+# FastAPI app
+# =========================
 app = FastAPI(title="Ecom WhatsApp Bot")
 
-llm = ChatOpenAI(model=MODEL_NAME, temperature=0)
-
-router_chain, router_summary, router_with_mem = make_router(llm)
-products_agent_obj = make_products_agent(llm, hybrid=True)
+# Runtime por defecto (env)
+_runtime = build_runtime()
 
 def products_agent_dump():
-    return products_agent_obj.dump()
+    return _runtime["products_agent_obj"].dump()
 
 class WAIn(BaseModel):
     session_id: str
@@ -31,17 +96,29 @@ class WAIn(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "provider": _runtime["provider"], "model": _runtime["model"]}
 
 @app.post("/webhook")
-async def webhook(msg: WAIn):
+async def webhook(
+    msg: WAIn,
+    provider: Optional[str] = Query(None, description="Override provider: openai|ollama|gemini"),
+    model: Optional[str] = Query(None, description="Override model name for the selected provider"),
+    temperature: Optional[float] = Query(None, description="Override temperature")
+):
+    """
+    Permite override puntual del proveedor/modelo/temperature vía query params.
+    Si no se pasa nada, usa el runtime por defecto (env).
+    """
+    # Si llega override, levantamos un runtime temporal para esta llamada
+    runtime = _runtime if not (provider or model or (temperature is not None)) else build_runtime(provider, model, temperature)
+
     hist = get_message_history(msg.session_id)
     hist.add_user_message(msg.text)
 
-    intent = router_chain.invoke({"input": msg.text}).strip().lower()
+    intent = runtime["router_chain"].invoke({"input": msg.text}).strip().lower()
 
     if intent == "productos":
-        output = products_agent_obj({"input": msg.text})
+        output = runtime["products_agent_obj"]({"input": msg.text})
     elif intent == "pedidos":
         output = "Agente Pedidos: próximamente."
     elif intent == "pagos":
@@ -52,30 +129,35 @@ async def webhook(msg: WAIn):
         output = "Puedo ayudarte con productos, pedidos, pagos u ofertas. ¿Cuál prefieres?"
 
     hist.add_ai_message(output)
-    router_summary.save_context({"input": msg.text}, {"output": output})
+    runtime["router_summary"].save_context({"input": msg.text}, {"output": output})
     
-    print("[DEBUG] Router summary:", router_summary.load_memory_variables({}).get("summary_context", []))
-    print("[DEBUG] Products mem:", products_agent_dump())
+    # DEBUGs útiles
+    print("[DEBUG] Provider:", runtime["provider"])
+    print("[DEBUG] Model:", runtime["model"])
+    print("[DEBUG] Router summary:", runtime["router_summary"].load_memory_variables({}).get("summary_context", []))
+    print("[DEBUG] Products mem:", runtime["products_agent_obj"].dump())
     print("[DEBUG] History:", [{"type": m.type, "content": m.content} for m in hist.messages])
 
-    return {"intent": intent, "reply": output}
-
+    return {
+        "provider": runtime["provider"],
+        "model": runtime["model"],
+        "intent": intent,
+        "reply": output
+    }
 
 @app.get("/debug/memory")
 def debug_memory(session_id: str = Query(..., description="ID de sesión")) -> Dict[str, Any]:
-    # 1) Historial crudo (mensajes)
     hist = get_message_history(session_id)
     history_msgs = [{"type": m.type, "content": m.content} for m in hist.messages]
 
-    # 2) Resumen global del router
-    router_vars = router_summary.load_memory_variables({})
+    router_vars = _runtime["router_summary"].load_memory_variables({})
     summary_context = router_vars.get("summary_context", [])
 
-    # 3) Memoria del agente de productos
-    # (ver paso 2B para exponer la memoria del agente)
-    prod_mem = products_agent_dump()  # <- función que vamos a agregar abajo
+    prod_mem = products_agent_dump()
     return {
         "session_id": session_id,
+        "provider": _runtime["provider"],
+        "model": _runtime["model"],
         "history": history_msgs,
         "router_summary_context": summary_context,
         "products_agent_memory": prod_mem,
@@ -83,5 +165,5 @@ def debug_memory(session_id: str = Query(..., description="ID de sesión")) -> D
 
 @app.get("/debug/search")
 def debug_search(q: str):
-    docs = products_agent_obj.retriever.get_relevant_documents(q)
+    docs = _runtime["products_agent_obj"].retriever.get_relevant_documents(q)
     return [{"content": d.page_content, "meta": d.metadata} for d in docs]

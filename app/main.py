@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any, Dict, Optional, Tuple
 from fastapi import FastAPI, Query
@@ -9,6 +10,7 @@ from langchain_openai import ChatOpenAI
 from langchain_community.chat_models import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+from app.agents.products2 import agent_products
 from app.router import make_router
 from app.agents.products import make_products_agent
 from app.memory import get_message_history
@@ -144,7 +146,7 @@ async def webhook(
     intent = runtime["router_chain"].invoke({"input": msg.text}).strip().lower()
 
     if intent == "consulta_producto" or intent == "productos":
-        output = runtime["products_agent_obj"]({"input": msg.text})
+        output = agent_products(msg.text)
     elif intent == "pedido":
         output = "Agente Pedidos: próximamente."
     elif intent == "pagos":
@@ -168,8 +170,6 @@ async def webhook(
     # DEBUGs útiles
     print("[DEBUG] Provider:", runtime["provider"])
     print("[DEBUG] Model:", runtime["model"])
-    print("[DEBUG] Router summary:", runtime["router_summary"].load_memory_variables({}).get("summary_context", []))
-    print("[DEBUG] Products mem:", runtime["products_agent_obj"].dump())
     print("[DEBUG] History:", [{"type": m.type, "content": m.content} for m in hist.messages])
 
     return {

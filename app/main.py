@@ -10,9 +10,8 @@ from langchain_openai import ChatOpenAI
 from langchain_community.chat_models import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from app.agents.products2 import agent_products
+from app.agents.products import agent_products
 from app.router import make_router
-from app.agents.products import make_products_agent
 from app.memory import get_message_history
 
 # =========================
@@ -68,7 +67,6 @@ def build_runtime(
     llm = make_llm(use_provider, use_model, use_temperature)
 
     router_chain, router_summary, router_with_mem = make_router(llm)
-    products_agent_obj = make_products_agent(llm, hybrid=True)
 
     return {
         "provider": use_provider,
@@ -78,7 +76,6 @@ def build_runtime(
         "router_chain": router_chain,
         "router_summary": router_summary,
         "router_with_mem": router_with_mem,
-        "products_agent_obj": products_agent_obj,
     }
 
 # =========================

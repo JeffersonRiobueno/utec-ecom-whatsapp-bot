@@ -113,22 +113,56 @@ async def webhook(
     runtime = _runtime if not (provider or model or (temperature is not None)) else build_runtime(provider, model, temperature)
 
     hist = get_message_history(msg.session_id)
-    hist.add_user_message(msg.text)
+
+    # Intent: recuperar top-3 del historial (últimos 3 mensajes del buffer)
+    top_history = []
+    try:
+        # Si la historia expone `.messages` (ChatMessageHistory), usamos esa lista
+        if hasattr(hist, "messages") and isinstance(hist.messages, list):
+            # tomamos los últimos 3
+            last_msgs = hist.messages[-3:]
+            top_history = [{"type": m.type, "content": m.content} for m in last_msgs]
+        else:
+            # Algunas implementaciones ofrecen get_messages() o get_recent_messages()
+            if hasattr(hist, "get_messages"):
+                msgs = hist.get_messages() or []
+                last_msgs = msgs[-3:]
+                # Mensajes pueden venir como dicts o objetos
+                formatted = []
+                for m in last_msgs:
+                    if isinstance(m, dict):
+                        formatted.append({"type": m.get("type"), "content": m.get("content")})
+                    else:
+                        # intentar atributos
+                        t = getattr(m, "type", None)
+                        c = getattr(m, "content", None)
+                        formatted.append({"type": t, "content": c})
+                top_history = formatted
+    except Exception:
+        top_history = []
 
     intent = runtime["router_chain"].invoke({"input": msg.text}).strip().lower()
 
-    if intent == "productos":
+    if intent == "consulta_producto" or intent == "productos":
         output = runtime["products_agent_obj"]({"input": msg.text})
-    elif intent == "pedidos":
+    elif intent == "pedido":
         output = "Agente Pedidos: próximamente."
     elif intent == "pagos":
         output = "Agente Pagos: próximamente."
-    elif intent == "ofertas":
-        output = "Agente Ofertas: próximamente."
+    elif intent == "otro" or intent == "pagos" or intent == "talla" or intent == "entregas" :
+        output = "Agente para atender otras consultas: próximamente."
+    elif intent == "saludo":
+        output = "Agente de Saludos: próximamente."
+    elif intent == "seguimiento":
+        output = "Agente de Seguimiento: próximamente."
+    elif intent == "humano":
+        output = "Funcionalidad para conectar con humano: próximamente."
     else:
         output = "Puedo ayudarte con productos, pedidos, pagos u ofertas. ¿Cuál prefieres?"
 
+    hist.add_user_message(msg.text)
     hist.add_ai_message(output)
+
     runtime["router_summary"].save_context({"input": msg.text}, {"output": output})
     
     # DEBUGs útiles
@@ -142,7 +176,8 @@ async def webhook(
         "provider": runtime["provider"],
         "model": runtime["model"],
         "intent": intent,
-        "reply": output
+        "reply": output,
+        "top_history": top_history,
     }
 
 @app.get("/debug/memory")

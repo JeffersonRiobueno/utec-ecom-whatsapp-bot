@@ -1,61 +1,18 @@
-import json
-import os
 from typing import Any, Dict, Optional, Tuple
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
-from dotenv import load_dotenv
-import httpx
 
-# Proveedores de LangChain
-from langchain_openai import ChatOpenAI
-from langchain_community.chat_models import ChatOllama
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from app.router import make_router
 from app.memory import get_message_history
-from langchain.agents import initialize_agent, AgentType
-from app.tools.intent_tools import products_tool, orders_tool, payments_tool, other_tool, greeting_tool, tracking_tool, human_tool
 from app.graph import run_graph
+from app.llm_utils import make_llm, DEFAULT_PROVIDER, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 
-# =========================
-# Config & utilidades
-# =========================
-load_dotenv()
-
-DEFAULT_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()  # openai | ollama | gemini
-DEFAULT_MODEL = os.getenv("MODEL_NAME", "gpt-4o-mini")          # por proveedor
-DEFAULT_TEMPERATURE = float(os.getenv("MODEL_TEMPERATURE", "0"))
-
-# (Opcional) URLs/keys por proveedor
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # requerido si usas gemini
 
 # =========================
 # Fábrica de LLMs
 # =========================
-def make_llm(
-    provider: str,
-    model: str,
-    temperature: float
-):
-    provider = (provider or DEFAULT_PROVIDER).lower()
-
-    if provider == "openai":
-        # Requiere: OPENAI_API_KEY
-        return ChatOpenAI(model=model, temperature=temperature)
-
-    if provider == "ollama":
-        # Requiere: Ollama corriendo localmente o remoto
-        # Modelos típicos: "llama3.1", "qwen2.5", "phi3", etc.
-        return ChatOllama(model=model, base_url=OLLAMA_BASE_URL, temperature=temperature)
-
-    if provider == "gemini":
-        # Requiere: GOOGLE_API_KEY
-        if not GOOGLE_API_KEY:
-            raise RuntimeError("Falta GOOGLE_API_KEY para usar Gemini.")
-        return ChatGoogleGenerativeAI(model=model, temperature=temperature, google_api_key=GOOGLE_API_KEY)
-
-    raise ValueError(f"Proveedor LLM no soportado: {provider}. Usa: openai | ollama | gemini")
+# Movido a app/llm_utils.py
 
 def build_runtime(
     provider: Optional[str] = None,
@@ -145,7 +102,7 @@ async def webhook(
 
     # Usar el grafo de LangGraph para manejar la intención y ejecutar la acción
     try:
-        output = await run_graph(msg.session_id, msg.text)
+        output = await run_graph(msg.session_id, msg.text, runtime["provider"], runtime["model"], runtime["temperature"])
         print(f"[DEBUG] Webhook output: {output}")
     except Exception as e:
         print(f"[ERROR] Exception in webhook run_graph: {e}")

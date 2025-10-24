@@ -1,19 +1,17 @@
 """Grafo de LangGraph para el bot de ecommerce con patrón Orquestador - Worker - Sintetizador y state persistente."""
 
-from typing import TypedDict, Annotated, Sequence
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from typing import TypedDict, Annotated, Sequence, Any
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
-from langchain_core.runnables import RunnableConfig
 from app.tools.intent_tools import products_tool, orders_tool, payments_tool, other_tool, greeting_tool, tracking_tool, human_tool
 from app.router import make_router
 from app.memory import get_message_history
-from langchain_openai import ChatOpenAI  # Para sintetizador
-import os
+from app.llm_utils import make_llm
 
 # Función para obtener LLM para sintetizador
-def get_synthesizer_llm():
-    return ChatOpenAI(model="gpt-4o-mini", temperature=0.0)  # Defaults
+def get_synthesizer_llm(provider=None, model=None, temperature=None):
+    return make_llm(provider, model, temperature)
 
 # Estado del grafo
 class BotState(TypedDict):
@@ -22,6 +20,7 @@ class BotState(TypedDict):
     session_id: str
     raw_output: str  # Output crudo del Worker
     final_output: str  # Output sintetizado
+    llm: Any  # LLM dinámico
 
 # Prompt para el Sintetizador (modificable en app/prompts.py o aquí)
 SYNTHESIZER_PROMPT = ChatPromptTemplate.from_messages([
@@ -39,17 +38,18 @@ Eres un sintetizador de respuestas para un bot de ecommerce por WhatsApp.
 # Instancia del router (asumiendo que se crea una vez)
 _router_chain = None
 
-def get_router():
+def get_router(provider=None, model=None, temperature=None):
     global _router_chain
     if _router_chain is None:
-        llm = get_synthesizer_llm()  # Reusar LLM
+        llm = get_synthesizer_llm(provider, model, temperature)  # Reusar LLM
         _router_chain, _, _ = make_router(llm)
     return _router_chain
 
 # Nodo: Clasificar intención
 def classify_intent(state: BotState) -> BotState:
     user_message = state["messages"][-1].content if state["messages"] else ""
-    router = get_router()
+    llm = state["llm"]
+    router, _, _ = make_router(llm)  # Crear router con llm dinámico
     intent = router.invoke({"input": user_message}).strip().lower()
     print(f"[DEBUG] Classified intent: {intent}")
     return {"intent": intent}
@@ -87,7 +87,7 @@ def handle_human(state: BotState) -> BotState:
 
 # Nodo: Sintetizar respuesta
 def synthesize(state: BotState) -> BotState:
-    llm = get_synthesizer_llm()
+    llm = state["llm"]
     chain = SYNTHESIZER_PROMPT | llm
     response = chain.invoke({"raw_output": state["raw_output"]})
     print(f"[DEBUG] Synthesized output: {response.content}")
@@ -151,7 +151,7 @@ graph.add_edge("synthesize", END)
 compiled_graph = graph.compile()
 
 # Función para invocar el grafo
-async def run_graph(session_id: str, user_text: str) -> str:
+async def run_graph(session_id: str, user_text: str, provider=None, model=None, temperature=None) -> str:
     try:
         # Obtener historial
     ##    hist = get_message_history(session_id)
@@ -164,6 +164,7 @@ async def run_graph(session_id: str, user_text: str) -> str:
             "session_id": session_id,
             "raw_output": "",
             "final_output": "",
+            "llm": get_synthesizer_llm(provider, model, temperature),
         }
 
         print(f"[DEBUG] Initial state: {initial_state}")

@@ -26,6 +26,7 @@ class ProductsTool(BaseTool):
                 data = resp.json()
                 return data.get("result", "No se encontraron productos.")
             except Exception as e:
+                print(f"[ERROR] Failed to connect to products agent: {e}")
                 return f"Error conectando con agente productos: {e}"
 
     def _run(self, query: str) -> str:

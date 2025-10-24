@@ -15,6 +15,7 @@ from app.router import make_router
 from app.memory import get_message_history
 from langchain.agents import initialize_agent, AgentType
 from app.tools.intent_tools import products_tool, orders_tool, payments_tool, other_tool, greeting_tool, tracking_tool, human_tool
+from app.graph import run_graph
 
 # =========================
 # Config & utilidades
@@ -61,7 +62,7 @@ def build_runtime(
     model: Optional[str] = None,
     temperature: Optional[float] = None
 ):
-    """Crea (llm, router_chain, router_summary, router_with_mem, agent) con el proveedor indicado."""
+    """Crea (llm, router_chain, router_summary, router_with_mem) con el proveedor indicado."""
     use_provider = (provider or DEFAULT_PROVIDER).lower()
     use_model = model or DEFAULT_MODEL
     use_temperature = float(temperature if temperature is not None else DEFAULT_TEMPERATURE)
@@ -69,16 +70,6 @@ def build_runtime(
     llm = make_llm(use_provider, use_model, use_temperature)
 
     router_chain, router_summary, router_with_mem = make_router(llm)
-
-    # Crear agente con tools
-    tools = [products_tool, orders_tool, payments_tool, other_tool, greeting_tool, tracking_tool, human_tool]
-    agent = initialize_agent(
-        tools=tools,
-        llm=llm,
-        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-        verbose=True,
-        handle_parsing_errors=True
-    )
 
     return {
         "provider": use_provider,
@@ -88,7 +79,6 @@ def build_runtime(
         "router_chain": router_chain,
         "router_summary": router_summary,
         "router_with_mem": router_with_mem,
-        "agent": agent,
     }
 
 # =========================
@@ -153,11 +143,15 @@ async def webhook(
     except Exception:
         top_history = []
 
-    # Usar el agente con tools para manejar la intención y ejecutar la acción
-    output = await runtime["agent"].arun(msg.text)
-
-    hist.add_user_message(msg.text)
-    hist.add_ai_message(output)
+    # Usar el grafo de LangGraph para manejar la intención y ejecutar la acción
+    try:
+        output = await run_graph(msg.session_id, msg.text)
+        print(f"[DEBUG] Webhook output: {output}")
+    except Exception as e:
+        print(f"[ERROR] Exception in webhook run_graph: {e}")
+        import traceback
+        traceback.print_exc()
+        output = "Parece que hubo un problema al intentar conectar con el agente. Esto puede deberse a un error de red. Te recomiendo intentar de nuevo más tarde. Si el problema persiste, por favor contáctanos por otro medio. ¡Estamos aquí para ayudarte!"
 
     runtime["router_summary"].save_context({"input": msg.text}, {"output": output})
     

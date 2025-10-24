@@ -4,15 +4,16 @@ from typing import Any, Dict, Optional, Tuple
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 from dotenv import load_dotenv
+import httpx
 
 # Proveedores de LangChain
 from langchain_openai import ChatOpenAI
 from langchain_community.chat_models import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from app.agents.products import agent_products
 from app.router import make_router
 from app.memory import get_message_history
+from app.tools.remote_products import remote_products_tool
 
 # =========================
 # Config & utilidades
@@ -143,7 +144,7 @@ async def webhook(
     intent = runtime["router_chain"].invoke({"input": msg.text}).strip().lower()
 
     if intent == "consulta_producto" or intent == "productos":
-        output = agent_products(msg.text)
+        output = await remote_products_tool._arun(msg.text)
     elif intent == "pedido":
         output = "Agente Pedidos: próximamente."
     elif intent == "pagos":

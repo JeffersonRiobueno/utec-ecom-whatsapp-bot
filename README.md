@@ -27,3 +27,9 @@ Deben recibir con input un objeto de este tipo
 ```
 {"session_id":"5491133344455","text":"Mensaje a procesar"}
 ```
+
+## MCP SERVER
+
+| Nombre | Repo |
+|--|--|
+| WOO MCP | https://github.com/JeffersonRiobueno/mcp_woo |

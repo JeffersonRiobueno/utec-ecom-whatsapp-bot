@@ -7,6 +7,7 @@ from app.router import make_router
 from app.memory import get_message_history
 from app.graph import run_graph
 from app.llm_utils import make_llm, DEFAULT_PROVIDER, DEFAULT_MODEL, DEFAULT_TEMPERATURE
+from app.media_utils import preprocess_message
 
 
 # =========================
@@ -52,6 +53,8 @@ def products_agent_dump():
 class WAIn(BaseModel):
     session_id: str
     text: str
+    mimetype: str = "text"  # Default to text for backward compatibility
+    filename: str = ""
 
 @app.get("/health")
 def health():
@@ -100,9 +103,13 @@ async def webhook(
     except Exception:
         top_history = []
 
+    # Preprocesar mensaje multimedia si es necesario
+    processed_text = preprocess_message(msg.text, msg.mimetype, msg.filename)
+    print(f"[DEBUG] Processed text: {processed_text[:100]}...")
+
     # Usar el grafo de LangGraph para manejar la intención y ejecutar la acción
     try:
-        output = await run_graph(msg.session_id, msg.text, runtime["provider"], runtime["model"], runtime["temperature"])
+        output = await run_graph(msg.session_id, processed_text, runtime["provider"], runtime["model"], runtime["temperature"])
         print(f"[DEBUG] Webhook output: {output}")
     except Exception as e:
         print(f"[ERROR] Exception in webhook run_graph: {e}")

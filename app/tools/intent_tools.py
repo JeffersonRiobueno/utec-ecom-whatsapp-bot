@@ -43,6 +43,10 @@ class OrdersTool(BaseTool):
         return "Agente Pedidos: próximamente. Procesando consulta sobre pedidos."
 
     def _run(self, query: str) -> str:
+        import asyncio
+        return asyncio.run(self._arun(query))
+
+    def _run(self, query: str) -> str:
         return self._arun(query)
 
 
@@ -53,6 +57,10 @@ class PaymentsTool(BaseTool):
     async def _arun(self, query: str) -> str:
         # Placeholder
         return "Agente Pagos: próximamente. Procesando consulta sobre pagos."
+
+    def _run(self, query: str) -> str:
+        import asyncio
+        return asyncio.run(self._arun(query))
 
     def _run(self, query: str) -> str:
         return self._arun(query)
@@ -67,7 +75,8 @@ class OtherTool(BaseTool):
         return "Agente para atender otras consultas: próximamente."
 
     def _run(self, query: str) -> str:
-        return self._arun(query)
+        import asyncio
+        return asyncio.run(self._arun(query))
 
 
 class GreetingTool(BaseTool):
@@ -78,7 +87,8 @@ class GreetingTool(BaseTool):
         return "¡Hola! ¿En qué puedo ayudarte hoy?"
 
     def _run(self, query: str) -> str:
-        return self._arun(query)
+        import asyncio
+        return asyncio.run(self._arun(query))
 
 
 class TrackingTool(BaseTool):
@@ -89,7 +99,8 @@ class TrackingTool(BaseTool):
         return "Si quieres revisar un pedido, por favor proporciona el número de pedido o el correo asociado."
 
     def _run(self, query: str) -> str:
-        return self._arun(query)
+        import asyncio
+        return asyncio.run(self._arun(query))
 
 
 class HumanTool(BaseTool):
@@ -100,7 +111,8 @@ class HumanTool(BaseTool):
         return "Te transferiré a un agente humano. Por favor espera un momento."
 
     def _run(self, query: str) -> str:
-        return self._arun(query)
+        import asyncio
+        return asyncio.run(self._arun(query))
 
 
 # Instancias de tools

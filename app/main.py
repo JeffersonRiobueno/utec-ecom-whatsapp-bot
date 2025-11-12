@@ -104,7 +104,7 @@ async def webhook(
         top_history = []
 
     # Preprocesar mensaje multimedia si es necesario
-    processed_text = preprocess_message(msg.text, msg.mimetype, msg.filename)
+    processed_text = preprocess_message(msg.text, msg.mimetype, msg.filename, runtime["provider"])
     print(f"[DEBUG] Processed text: {processed_text[:100]}...")
 
     # Usar el grafo de LangGraph para manejar la intención y ejecutar la acción

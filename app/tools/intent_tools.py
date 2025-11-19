@@ -46,9 +46,6 @@ class OrdersTool(BaseTool):
         import asyncio
         return asyncio.run(self._arun(query))
 
-    def _run(self, query: str) -> str:
-        return self._arun(query)
-
 
 class PaymentsTool(BaseTool):
     name: str = "payments_handling"
@@ -61,9 +58,6 @@ class PaymentsTool(BaseTool):
     def _run(self, query: str) -> str:
         import asyncio
         return asyncio.run(self._arun(query))
-
-    def _run(self, query: str) -> str:
-        return self._arun(query)
 
 
 class OtherTool(BaseTool):

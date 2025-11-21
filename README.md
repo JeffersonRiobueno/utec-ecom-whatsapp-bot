@@ -18,6 +18,7 @@ uvicorn app.main:app --reload --port 8000
 | Agente Saludos | Agente basico para gestionar mensajes de saludos del usuario | https://github.com/JeffersonRiobueno/utec_agent_saludos |
 | Agente Pagos | Agente encargado de atender consultas relacionadas a metodos de pago | https://github.com/JeffersonRiobueno/utec_agent_pagos |
 | Agente Otros | Agente para responder otros mensajes, como de preguntas frecuentes | https://github.com/JeffersonRiobueno/utec_agent_otros |
+| Agente Seguimiento | Agente para gestionar el seguimiento de pedidos | https://github.com/JeffersonRiobueno/utec_agent_seguimiento |
 
 ## Integracion
 
@@ -29,6 +30,8 @@ Deben recibir con input un objeto de este tipo
 ```
 
 ## MCP SERVER
+
+Gestiona la comunicacion con WOOcommerce
 
 | Nombre | Repo |
 |--|--|

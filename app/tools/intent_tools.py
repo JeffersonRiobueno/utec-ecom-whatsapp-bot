@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 AGENT_PRODUCTS_URL = os.getenv("AGENT_PRODUCTS_URL", "http://agent_product:8000")
+AGENT_SALUDOS_URL = os.getenv("AGENT_SALUDOS_URL", "http://agent_saludos:8000")
+AGENT_PAGOS_URL = os.getenv("AGENT_PAGOS_URL", "http://agent_payment:8000")
 
 class ProductsTool(BaseTool):
     name: str = "products_search"
@@ -52,8 +54,19 @@ class PaymentsTool(BaseTool):
     description: str = "Maneja pagos y métodos de pago. Úsalo para consultas sobre formas de pago."
 
     async def _arun(self, query: str) -> str:
-        # Placeholder
-        return "Agente Pagos: próximamente. Procesando consulta sobre pagos."
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(
+                    f"{AGENT_PAGOS_URL}/payment_agent",
+                    json={"text": query},
+                    timeout=10.0
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("result", "No se encontraron productos.")
+            except Exception as e:
+                print(f"[ERROR] Failed to connect to products agent: {e}")
+                return f"Error conectando con agente productos: {e}"
 
     def _run(self, query: str) -> str:
         import asyncio
@@ -78,7 +91,19 @@ class GreetingTool(BaseTool):
     description: str = "Maneja saludos y conversaciones iniciales."
 
     async def _arun(self, query: str) -> str:
-        return "¡Hola! ¿En qué puedo ayudarte hoy?"
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(
+                    f"{AGENT_SALUDOS_URL}/greeting_agent",
+                    json={"text": query},
+                    timeout=10.0
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("result", "No se encontraron saludos.")
+            except Exception as e:
+                print(f"[ERROR] Failed to connect to Greetings agent: {e}")
+                return f"Error conectando con agente saludos: {e}"
 
     def _run(self, query: str) -> str:
         import asyncio

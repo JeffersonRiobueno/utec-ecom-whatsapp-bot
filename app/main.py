@@ -109,8 +109,7 @@ async def webhook(
 
     # Usar el grafo de LangGraph para manejar la intención y ejecutar la acción
     try:
-        output = await run_graph(msg.session_id, processed_text, runtime["provider"], runtime["model"], runtime["temperature"])
-        print(f"[DEBUG] Webhook output: {output}")
+            output = await run_graph(msg.session_id, processed_text, runtime["provider"], runtime["model"], runtime["temperature"], runtime.get("router_summary"))
     except Exception as e:
         print(f"[ERROR] Exception in webhook run_graph: {e}")
         import traceback

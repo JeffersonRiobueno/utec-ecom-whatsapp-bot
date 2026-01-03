@@ -18,6 +18,7 @@ class BotState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], "add_messages"]
     intent: str
     session_id: str
+    context_summary: str
     raw_output: str  # Output crudo del Worker
     final_output: str  # Output sintetizado
     llm: Any  # LLM dinámico
@@ -48,50 +49,76 @@ def get_router(provider=None, model=None, temperature=None):
 # Nodo: Clasificar intención
 def classify_intent(state: BotState) -> BotState:
     user_message = state["messages"][-1].content if state["messages"] else ""
+    context = state.get("context_summary", "")
+    combined_input = (f"{context}\n\n{user_message}") if context else user_message
     llm = state["llm"]
     router, _, _ = make_router(llm)  # Crear router con llm dinámico
-    intent = router.invoke({"input": user_message}).strip().lower()
+    intent = router.invoke({"input": combined_input}).strip().lower()
     print(f"[DEBUG] Classified intent: {intent}")
     return {"intent": intent}
 
 # Nodos: Manejar cada intención
 def handle_products(state: BotState) -> BotState:
     user_message = state["messages"][-1].content
-    output = products_tool._run(user_message)  # Síncrono por simplicidad
+    session_id = state.get("session_id")
+    context = state.get("context_summary", "")
+    output = products_tool._run(user_message, session_id=session_id, context_summary=context)  # Síncrono por simplicidad
     print(f"[DEBUG] Raw output from products_tool: {output}")
     return {"raw_output": output}
 
 def handle_orders(state: BotState) -> BotState:
-    output = orders_tool._run(state["messages"][-1].content)
+    user_message = state["messages"][-1].content
+    session_id = state.get("session_id")
+    context = state.get("context_summary", "")
+    output = orders_tool._run(user_message, session_id=session_id, context_summary=context)
     return {"raw_output": output}
 
 def handle_payments(state: BotState) -> BotState:
-    output = payments_tool._run(state["messages"][-1].content)
+    user_message = state["messages"][-1].content
+    session_id = state.get("session_id")
+    context = state.get("context_summary", "")
+    output = payments_tool._run(user_message, session_id=session_id, context_summary=context)
     return {"raw_output": output}
 
 def handle_other(state: BotState) -> BotState:
-    output = other_tool._run(state["messages"][-1].content)
+    user_message = state["messages"][-1].content
+    session_id = state.get("session_id")
+    context = state.get("context_summary", "")
+    output = other_tool._run(user_message, session_id=session_id, context_summary=context)
     return {"raw_output": output}
 
 def handle_greeting(state: BotState) -> BotState:
-    output = greeting_tool._run(state["messages"][-1].content)
+    user_message = state["messages"][-1].content
+    session_id = state.get("session_id")
+    context = state.get("context_summary", "")
+    output = greeting_tool._run(user_message, session_id=session_id, context_summary=context)
     return {"raw_output": output}
 
 def handle_tracking(state: BotState) -> BotState:
-    output = tracking_tool._run(state["messages"][-1].content)
+    user_message = state["messages"][-1].content
+    session_id = state.get("session_id")
+    context = state.get("context_summary", "")
+    output = tracking_tool._run(user_message, session_id=session_id, context_summary=context)
     return {"raw_output": output}
 
 def handle_human(state: BotState) -> BotState:
-    output = human_tool._run(state["messages"][-1].content)
+    user_message = state["messages"][-1].content
+    session_id = state.get("session_id")
+    context = state.get("context_summary", "")
+    output = human_tool._run(user_message, session_id=session_id, context_summary=context)
     return {"raw_output": output}
 
 # Nodo: Sintetizar respuesta
 def synthesize(state: BotState) -> BotState:
-    llm = state["llm"]
-    chain = SYNTHESIZER_PROMPT | llm
-    response = chain.invoke({"raw_output": state["raw_output"]})
-    print(f"[DEBUG] Synthesized output: {response.content}")
-    return {"final_output": response.content}
+    # Bypass summarization as per user request
+    # llm = state["llm"]
+    # chain = SYNTHESIZER_PROMPT | llm
+    # response = chain.invoke({"raw_output": state["raw_output"]})
+    # print(f"[DEBUG] Synthesized output: {response.content}")
+    # return {"final_output": response.content}
+    
+    print(f"[DEBUG] Bypassing synthesizer, returning raw output")
+    return {"final_output": state["raw_output"]}
 
 # Función de ruteo condicional
 def route_intent(state: BotState) -> str:
@@ -151,17 +178,42 @@ graph.add_edge("synthesize", END)
 compiled_graph = graph.compile()
 
 # Función para invocar el grafo
-async def run_graph(session_id: str, user_text: str, provider=None, model=None, temperature=None) -> str:
+async def run_graph(session_id: str, user_text: str, provider=None, model=None, temperature=None, router_summary=None) -> str:
     try:
-        # Obtener historial
-    ##    hist = get_message_history(session_id)
-    ##    hist.add_user_message(user_text)
+        # Obtener historial y añadir mensaje del usuario
+        hist = get_message_history(session_id)
+        try:
+            hist.add_user_message(user_text)
+        except Exception:
+            # Si la implementación de historial falla, continuar
+            pass
+
+        # Construir context_summary a partir de la memoria del router si está disponible
+        context_summary = ""
+        if router_summary is not None:
+            try:
+                router_vars = router_summary.load_memory_variables({})
+                ctx = router_vars.get("summary_context", "")
+                if isinstance(ctx, list):
+                    # Extraer texto si vienen como mensajes
+                    parts = []
+                    for m in ctx:
+                        if hasattr(m, "content"):
+                            parts.append(m.content)
+                        else:
+                            parts.append(str(m))
+                    context_summary = " ".join(parts)
+                else:
+                    context_summary = str(ctx)
+            except Exception:
+                context_summary = ""
 
         # Estado inicial
         initial_state = {
             "messages": [HumanMessage(content=user_text)],
             "intent": "",
             "session_id": session_id,
+            "context_summary": context_summary,
             "raw_output": "",
             "final_output": "",
             "llm": get_synthesizer_llm(provider, model, temperature),
@@ -175,7 +227,10 @@ async def run_graph(session_id: str, user_text: str, provider=None, model=None, 
 
         # Guardar respuesta en historial
         output = result.get("final_output", "Respuesta no disponible.")
-    ##    hist.add_ai_message(output)
+        try:
+            hist.add_ai_message(output)
+        except Exception:
+            pass
 
         return output
     except Exception as e:

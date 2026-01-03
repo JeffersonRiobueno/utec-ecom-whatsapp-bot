@@ -16,12 +16,17 @@ class ProductsTool(BaseTool):
     name: str = "products_search"
     description: str = "Busca y consulta productos disponibles. Úsalo para preguntas sobre catálogo, precios o disponibilidad de productos."
 
-    async def _arun(self, query: str) -> str:
+    async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
+        payload = {"text": query}
+        if session_id:
+            payload["session_id"] = session_id
+        if context_summary:
+            payload["context_summary"] = context_summary
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.post(
                     f"{AGENT_PRODUCTS_URL}/products_agent_search",
-                    json={"text": query},
+                    json=payload,
                     timeout=10.0
                 )
                 resp.raise_for_status()
@@ -31,71 +36,81 @@ class ProductsTool(BaseTool):
                 print(f"[ERROR] Failed to connect to products agent: {e}")
                 return f"Error conectando con agente productos: {e}"
 
-    def _run(self, query: str) -> str:
+    def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         import asyncio
-        return asyncio.run(self._arun(query))
+        return asyncio.run(self._arun(query, session_id=session_id, context_summary=context_summary))
 
 
 class OrdersTool(BaseTool):
     name: str = "orders_management"
     description: str = "Maneja pedidos y órdenes. Úsalo para crear, consultar o gestionar pedidos."
 
-    async def _arun(self, query: str) -> str:
+    async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         # Placeholder: implementar lógica real para pedidos
         return "Agente Pedidos: próximamente. Procesando consulta sobre pedidos."
 
-    def _run(self, query: str) -> str:
+    def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         import asyncio
-        return asyncio.run(self._arun(query))
+        return asyncio.run(self._arun(query, session_id=session_id, context_summary=context_summary))
 
 
 class PaymentsTool(BaseTool):
     name: str = "payments_handling"
     description: str = "Maneja pagos y métodos de pago. Úsalo para consultas sobre formas de pago."
 
-    async def _arun(self, query: str) -> str:
+    async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
+        payload = {"text": query}
+        if session_id:
+            payload["session_id"] = session_id
+        if context_summary:
+            payload["context_summary"] = context_summary
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.post(
                     f"{AGENT_PAGOS_URL}/payment_agent",
-                    json={"text": query},
+                    json=payload,
                     timeout=10.0
                 )
                 resp.raise_for_status()
                 data = resp.json()
                 return data.get("result", "No se encontraron productos.")
             except Exception as e:
-                print(f"[ERROR] Failed to connect to products agent: {e}")
-                return f"Error conectando con agente productos: {e}"
+                print(f"[ERROR] Failed to connect to payments agent: {e}")
+                return f"Error conectando con agente pagos: {e}"
 
-    def _run(self, query: str) -> str:
+    def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         import asyncio
-        return asyncio.run(self._arun(query))
+        return asyncio.run(self._arun(query, session_id=session_id, context_summary=context_summary))
 
 
 class OtherTool(BaseTool):
     name: str = "general_queries"
     description: str = "Maneja consultas generales como tallas, envíos, tienda física, etc."
 
-    async def _arun(self, query: str) -> str:
+    async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         # Placeholder
         return "Agente para atender otras consultas: próximamente."
 
-    def _run(self, query: str) -> str:
+    def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         import asyncio
-        return asyncio.run(self._arun(query))
+        return asyncio.run(self._arun(query, session_id=session_id, context_summary=context_summary))
 
 
 class GreetingTool(BaseTool):
     name: str = "greetings"
     description: str = "Maneja saludos y conversaciones iniciales."
 
-    async def _arun(self, query: str) -> str:
+    async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
+        payload = {"text": query}
+        if session_id:
+            payload["session_id"] = session_id
+        if context_summary:
+            payload["context_summary"] = context_summary
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.post(
                     f"{AGENT_SALUDOS_URL}/greeting_agent",
-                    json={"text": query},
+                    json=payload,
                     timeout=10.0
                 )
                 resp.raise_for_status()
@@ -105,33 +120,33 @@ class GreetingTool(BaseTool):
                 print(f"[ERROR] Failed to connect to Greetings agent: {e}")
                 return f"Error conectando con agente saludos: {e}"
 
-    def _run(self, query: str) -> str:
+    def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         import asyncio
-        return asyncio.run(self._arun(query))
+        return asyncio.run(self._arun(query, session_id=session_id, context_summary=context_summary))
 
 
 class TrackingTool(BaseTool):
     name: str = "order_tracking"
     description: str = "Maneja seguimiento de pedidos."
 
-    async def _arun(self, query: str) -> str:
+    async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         return "Si quieres revisar un pedido, por favor proporciona el número de pedido o el correo asociado."
 
-    def _run(self, query: str) -> str:
+    def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         import asyncio
-        return asyncio.run(self._arun(query))
+        return asyncio.run(self._arun(query, session_id=session_id, context_summary=context_summary))
 
 
 class HumanTool(BaseTool):
     name: str = "human_transfer"
     description: str = "Transfiere a un humano cuando el usuario lo solicita o hay problemas."
 
-    async def _arun(self, query: str) -> str:
+    async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         return "Te transferiré a un agente humano. Por favor espera un momento."
 
-    def _run(self, query: str) -> str:
+    def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         import asyncio
-        return asyncio.run(self._arun(query))
+        return asyncio.run(self._arun(query, session_id=session_id, context_summary=context_summary))
 
 
 # Instancias de tools

@@ -11,6 +11,7 @@ load_dotenv()
 AGENT_PRODUCTS_URL = os.getenv("AGENT_PRODUCTS_URL", "http://agent_product:8000")
 AGENT_SALUDOS_URL = os.getenv("AGENT_SALUDOS_URL", "http://agent_saludos:8000")
 AGENT_PAGOS_URL = os.getenv("AGENT_PAGOS_URL", "http://agent_payment:8000")
+AGENT_OTROS_URL = os.getenv("AGENT_OTROS_URL", "http://agent_otros:8000")
 
 class ProductsTool(BaseTool):
     name: str = "products_search"
@@ -54,9 +55,9 @@ class OrdersTool(BaseTool):
         return asyncio.run(self._arun(query, session_id=session_id, context_summary=context_summary))
 
 
-class PaymentsTool(BaseTool):
-    name: str = "payments_handling"
-    description: str = "Maneja pagos y métodos de pago. Úsalo para consultas sobre formas de pago."
+class KnowledgeTool(BaseTool):
+    name: str = "general_queries"
+    description: str = "Maneja consultas generales como tallas, envíos, tienda física, etc."
 
     async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         payload = {"text": query}
@@ -67,29 +68,16 @@ class PaymentsTool(BaseTool):
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.post(
-                    f"{AGENT_PAGOS_URL}/payment_agent",
+                    f"{AGENT_OTROS_URL}/knowledge_agent_search",
                     json=payload,
                     timeout=10.0
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                return data.get("result", "No se encontraron productos.")
+                return data.get("result", "No se encontraron respuestas.")
             except Exception as e:
-                print(f"[ERROR] Failed to connect to payments agent: {e}")
-                return f"Error conectando con agente pagos: {e}"
-
-    def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
-        import asyncio
-        return asyncio.run(self._arun(query, session_id=session_id, context_summary=context_summary))
-
-
-class OtherTool(BaseTool):
-    name: str = "general_queries"
-    description: str = "Maneja consultas generales como tallas, envíos, tienda física, etc."
-
-    async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
-        # Placeholder
-        return "Agente para atender otras consultas: próximamente."
+                print(f"[ERROR] Failed to connect to otros agent: {e}")
+                return f"Error conectando con agente otros: {e}"
 
     def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         import asyncio
@@ -152,8 +140,7 @@ class HumanTool(BaseTool):
 # Instancias de tools
 products_tool = ProductsTool()
 orders_tool = OrdersTool()
-payments_tool = PaymentsTool()
-other_tool = OtherTool()
+knowledge_tool = KnowledgeTool()
 greeting_tool = GreetingTool()
 tracking_tool = TrackingTool()
 human_tool = HumanTool()
@@ -163,10 +150,7 @@ intent_tools = {
     "consulta_producto": products_tool,
     "productos": products_tool,
     "pedido": orders_tool,
-    "pagos": payments_tool,
-    "otro": other_tool,
-    "talla": other_tool,
-    "entregas": other_tool,
+    "otro": knowledge_tool,
     "saludo": greeting_tool,
     "seguimiento": tracking_tool,
     "humano": human_tool,

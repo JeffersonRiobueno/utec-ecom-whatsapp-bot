@@ -24,13 +24,11 @@ Tu tarea es analizar el mensaje del cliente y clasificarlo en UNA de las siguien
 ### Opciones de intención:
 - "pedido"
 - "consulta_producto"
+- "productos"
+- "pedido"
+- "otro"
 - "saludo"
 - "seguimiento"
-- "entregas"
-- "pagos"
-- "otro"
-- "humano"
-- "talla"
 
 ---
 
@@ -47,19 +45,21 @@ Tu tarea es analizar el mensaje del cliente y clasificarlo en UNA de las siguien
    - "¿Tienen tienda física?"
    - "¿Cuánto tarda el envío?"
    - "¿Qué métodos de pago tienen?"
+   - "¿Cómo registrar mi pago?"
+   - "¿Cuáles son los medios de pago?"
+   - "¿Qué formas de entrega tienen?"
    - "¿Tienen catálogo?"
    - "¿Qué promociones hay?"
    - "¿Qué venden?" (sin especificar producto)
+   - Preguntas frecuentes
+   - FAQs
    Entonces la intención es *"otro"*.
 8. Si solo saluda ("Hola", "Buenas tardes"), es *"saludo"*.
 9. Si pregunta por el estado de un pedido, es *"seguimiento"*.
 10. Si está respondiendo a una pregunta del bot con una palabra como "sí", "negra", "M", "una", Analiza la conversación para detectar el flujo actual.
-11. Consultas relacionados a formas de pago es "pagos"
-12. Consultas sobre delivery, envios, entregas, cobertura es "entregas"
-13. Si el usuario esta molesto o incomodo categorizar como "humano"
-14. Si la conversacióningresa en un bucle y el usuario/cliente lo nota o se molesta categorizar como "humano"
-15. Si el Usuario/cliente pide que lo pasen con un humano, categorizar como "humano"
-16. Para consultas sobre tallas o como saber la medida de mi muñeca o similiar, ategorizar como "talla"
+11. Si el usuario esta molesto o incomodo categorizar como "humano"
+12. Si la conversación ingresa en un bucle y el usuario/cliente lo nota o se molesta categorizar como "humano"
+13. Si el Usuario/cliente pide que lo pasen con un humano, categorizar como "humano"
 
 IMPORTANTE:
 - Responde solo con la intención elegida, sin comillas ni formato JSON.

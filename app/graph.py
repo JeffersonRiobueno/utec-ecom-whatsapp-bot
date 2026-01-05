@@ -4,7 +4,7 @@ from typing import TypedDict, Annotated, Sequence, Any
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
-from app.tools.intent_tools import products_tool, orders_tool, payments_tool, other_tool, greeting_tool, tracking_tool, human_tool
+from app.tools.intent_tools import products_tool, orders_tool, knowledge_tool, greeting_tool, human_tool, tracking_tool
 from app.router import make_router
 from app.memory import get_message_history
 from app.llm_utils import make_llm
@@ -34,6 +34,23 @@ Eres un sintetizador de respuestas para un bot de ecommerce por WhatsApp.
 - No inventes información.
 """),
     ("human", "{raw_output}")
+])
+
+# Prompt para Guardrail
+GUARDRAIL_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """
+Eres un guardrail de seguridad para un bot de ecommerce.
+Tu tarea es revisar la respuesta final antes de enviarla al usuario.
+Verifica que:
+- No contenga lenguaje ofensivo, discriminatorio o inapropiado.
+- No revele información sensible (datos personales, etc.), si hay datos personales emascarar con ****.
+- No prometa productos no disponibles o invente información.
+- La respuesta debe ser informativa y relevante para la consulta del usuario.
+
+Si la respuesta pasa todas las verificaciones y es apropiada, responde con: "APROBADO: [respuesta original]"
+Si falla alguna verificación o es demasiado vaga/irrelevante, responde con: "RECHAZADO: [explicación breve del problema] [respuesta corregida o alternativa]"
+"""),
+    ("human", "{final_output}")
 ])
 
 # Instancia del router (asumiendo que se crea una vez)
@@ -73,18 +90,11 @@ def handle_orders(state: BotState) -> BotState:
     output = orders_tool._run(user_message, session_id=session_id, context_summary=context)
     return {"raw_output": output}
 
-def handle_payments(state: BotState) -> BotState:
+def handle_knowledge(state: BotState) -> BotState:
     user_message = state["messages"][-1].content
     session_id = state.get("session_id")
     context = state.get("context_summary", "")
-    output = payments_tool._run(user_message, session_id=session_id, context_summary=context)
-    return {"raw_output": output}
-
-def handle_other(state: BotState) -> BotState:
-    user_message = state["messages"][-1].content
-    session_id = state.get("session_id")
-    context = state.get("context_summary", "")
-    output = other_tool._run(user_message, session_id=session_id, context_summary=context)
+    output = knowledge_tool._run(user_message, session_id=session_id, context_summary=context)
     return {"raw_output": output}
 
 def handle_greeting(state: BotState) -> BotState:
@@ -120,6 +130,28 @@ def synthesize(state: BotState) -> BotState:
     print(f"[DEBUG] Bypassing synthesizer, returning raw output")
     return {"final_output": state["raw_output"]}
 
+# Nodo: Guardrail de seguridad
+def guardrail(state: BotState) -> BotState:
+    llm = state["llm"]
+    chain = GUARDRAIL_PROMPT | llm
+    response = chain.invoke({"final_output": state["final_output"]})
+    guarded_output = response.content.strip()
+    
+    if guarded_output.startswith("APROBADO:"):
+        # Extraer la respuesta original
+        final_output = guarded_output.replace("APROBADO:", "").strip()
+        print(f"[DEBUG] Guardrail passed: {final_output[:100]}...")
+    elif guarded_output.startswith("RECHAZADO:"):
+        # Usar la respuesta corregida o alternativa
+        final_output = guarded_output.replace("RECHAZADO:", "").strip()
+        print(f"[DEBUG] Guardrail rejected and corrected: {final_output[:100]}...")
+    else:
+        # Fallback: asumir aprobado si no sigue el formato
+        final_output = state["final_output"]
+        print(f"[DEBUG] Guardrail format unexpected, using original: {final_output[:100]}...")
+    
+    return {"final_output": final_output}
+
 # Función de ruteo condicional
 def route_intent(state: BotState) -> str:
     intent = state.get("intent", "")
@@ -127,15 +159,12 @@ def route_intent(state: BotState) -> str:
         "consulta_producto": "handle_products",
         "productos": "handle_products",
         "pedido": "handle_orders",
-        "pagos": "handle_payments",
-        "otro": "handle_other",
-        "talla": "handle_other",
-        "entregas": "handle_other",
+        "otro": "handle_knowledge",
         "saludo": "handle_greeting",
         "seguimiento": "handle_tracking",
         "humano": "handle_human",
     }
-    return mapping.get(intent, "handle_other")
+    return mapping.get(intent, "handle_knowledge")
 
 # Construir el grafo
 graph = StateGraph(BotState)
@@ -144,12 +173,12 @@ graph = StateGraph(BotState)
 graph.add_node("classify_intent", classify_intent)
 graph.add_node("handle_products", handle_products)
 graph.add_node("handle_orders", handle_orders)
-graph.add_node("handle_payments", handle_payments)
-graph.add_node("handle_other", handle_other)
+graph.add_node("handle_knowledge", handle_knowledge)
 graph.add_node("handle_greeting", handle_greeting)
-graph.add_node("handle_tracking", handle_tracking)
 graph.add_node("handle_human", handle_human)
+graph.add_node("handle_tracking", handle_tracking)
 graph.add_node("synthesize", synthesize)
+graph.add_node("guardrail", guardrail)
 
 # Edges
 graph.set_entry_point("classify_intent")
@@ -159,8 +188,7 @@ graph.add_conditional_edges(
     {
         "handle_products": "handle_products",
         "handle_orders": "handle_orders",
-        "handle_payments": "handle_payments",
-        "handle_other": "handle_other",
+        "handle_knowledge": "handle_knowledge",
         "handle_greeting": "handle_greeting",
         "handle_tracking": "handle_tracking",
         "handle_human": "handle_human",
@@ -168,11 +196,14 @@ graph.add_conditional_edges(
 )
 
 # Todos los nodos de manejo van a synthesize
-for node in ["handle_products", "handle_orders", "handle_payments", "handle_other", "handle_greeting", "handle_tracking", "handle_human"]:
+for node in ["handle_products", "handle_orders", "handle_knowledge", "handle_greeting", "handle_tracking", "handle_human"]:
     graph.add_edge(node, "synthesize")
 
-# Sintetizador va a END
-graph.add_edge("synthesize", END)
+# Sintetizador va a guardrail
+graph.add_edge("synthesize", "guardrail")
+
+# Guardrail va a END
+graph.add_edge("guardrail", END)
 
 # Compilar el grafo
 compiled_graph = graph.compile()

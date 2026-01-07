@@ -8,6 +8,7 @@ from app.memory import get_message_history
 from app.graph import run_graph
 from app.llm_utils import make_llm, DEFAULT_PROVIDER, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from app.media_utils import preprocess_message
+from app.metrics.prometheus_metrics import get_metrics
 
 
 # =========================
@@ -59,6 +60,11 @@ class WAIn(BaseModel):
 @app.get("/health")
 def health():
     return {"ok": True, "provider": _runtime["provider"], "model": _runtime["model"]}
+
+@app.get("/metrics")
+def metrics():
+    """Endpoint de métricas de Prometheus."""
+    return get_metrics()
 
 @app.post("/webhook")
 async def webhook(

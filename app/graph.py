@@ -8,6 +8,15 @@ from app.tools.intent_tools import products_tool, orders_tool, knowledge_tool, g
 from app.router import make_router
 from app.memory import get_message_history
 from app.llm_utils import make_llm
+from app.metrics.prometheus_metrics import (
+    increment_agent_request_count, observe_agent_latency,
+    increment_intent_count, increment_guardrail_count
+)
+# Use central langfuse helpers for initialization and callback handler
+from app.metrics.langfuse_config import get_langfuse_callback_handler, get_langfuse_client
+import os
+import traceback
+import time
 
 # Función para obtener LLM para sintetizador
 def get_synthesizer_llm(provider=None, model=None, temperature=None):
@@ -65,57 +74,129 @@ def get_router(provider=None, model=None, temperature=None):
 
 # Nodo: Clasificar intención
 def classify_intent(state: BotState) -> BotState:
+    start_time = time.time()
     user_message = state["messages"][-1].content if state["messages"] else ""
     context = state.get("context_summary", "")
     combined_input = (f"{context}\n\n{user_message}") if context else user_message
     llm = state["llm"]
     router, _, _ = make_router(llm)  # Crear router con llm dinámico
     intent = router.invoke({"input": combined_input}).strip().lower()
-    print(f"[DEBUG] Classified intent: {intent}")
+
+    # Métricas
+    increment_intent_count(intent)
+
+    duration = time.time() - start_time
+    print(f"[DEBUG] Classified intent: {intent} (took {duration:.3f}s)")
     return {"intent": intent}
 
 # Nodos: Manejar cada intención
 def handle_products(state: BotState) -> BotState:
+    start_time = time.time()
     user_message = state["messages"][-1].content
     session_id = state.get("session_id")
     context = state.get("context_summary", "")
-    output = products_tool._run(user_message, session_id=session_id, context_summary=context)  # Síncrono por simplicidad
-    print(f"[DEBUG] Raw output from products_tool: {output}")
+
+    try:
+        output = products_tool._run(user_message, session_id=session_id, context_summary=context)  # Síncrono por simplicidad
+        increment_agent_request_count("products", "success")
+    except Exception as e:
+        print(f"[ERROR] Products agent error: {e}")
+        output = "Lo siento, hubo un problema al consultar productos. Por favor intenta de nuevo."
+        increment_agent_request_count("products", "error")
+
+    duration = time.time() - start_time
+    observe_agent_latency("products", duration)
+    print(f"[DEBUG] Raw output from products_tool: {output} (took {duration:.3f}s)")
     return {"raw_output": output}
 
 def handle_orders(state: BotState) -> BotState:
+    start_time = time.time()
     user_message = state["messages"][-1].content
     session_id = state.get("session_id")
     context = state.get("context_summary", "")
-    output = orders_tool._run(user_message, session_id=session_id, context_summary=context)
+
+    try:
+        output = orders_tool._run(user_message, session_id=session_id, context_summary=context)
+        increment_agent_request_count("orders", "success")
+    except Exception as e:
+        print(f"[ERROR] Orders agent error: {e}")
+        output = "Lo siento, hubo un problema al consultar pedidos. Por favor intenta de nuevo."
+        increment_agent_request_count("orders", "error")
+
+    duration = time.time() - start_time
+    observe_agent_latency("orders", duration)
     return {"raw_output": output}
 
 def handle_knowledge(state: BotState) -> BotState:
+    start_time = time.time()
     user_message = state["messages"][-1].content
     session_id = state.get("session_id")
     context = state.get("context_summary", "")
-    output = knowledge_tool._run(user_message, session_id=session_id, context_summary=context)
+
+    try:
+        output = knowledge_tool._run(user_message, session_id=session_id, context_summary=context)
+        increment_agent_request_count("knowledge", "success")
+    except Exception as e:
+        print(f"[ERROR] Knowledge agent error: {e}")
+        output = "Lo siento, hubo un problema al consultar información. Por favor intenta de nuevo."
+        increment_agent_request_count("knowledge", "error")
+
+    duration = time.time() - start_time
+    observe_agent_latency("knowledge", duration)
     return {"raw_output": output}
 
 def handle_greeting(state: BotState) -> BotState:
+    start_time = time.time()
     user_message = state["messages"][-1].content
     session_id = state.get("session_id")
     context = state.get("context_summary", "")
-    output = greeting_tool._run(user_message, session_id=session_id, context_summary=context)
+
+    try:
+        output = greeting_tool._run(user_message, session_id=session_id, context_summary=context)
+        increment_agent_request_count("greeting", "success")
+    except Exception as e:
+        print(f"[ERROR] Greeting agent error: {e}")
+        output = "¡Hola! ¿En qué puedo ayudarte hoy?"
+        increment_agent_request_count("greeting", "error")
+
+    duration = time.time() - start_time
+    observe_agent_latency("greeting", duration)
     return {"raw_output": output}
 
 def handle_tracking(state: BotState) -> BotState:
+    start_time = time.time()
     user_message = state["messages"][-1].content
     session_id = state.get("session_id")
     context = state.get("context_summary", "")
-    output = tracking_tool._run(user_message, session_id=session_id, context_summary=context)
+
+    try:
+        output = tracking_tool._run(user_message, session_id=session_id, context_summary=context)
+        increment_agent_request_count("tracking", "success")
+    except Exception as e:
+        print(f"[ERROR] Tracking agent error: {e}")
+        output = "Lo siento, hubo un problema al consultar el seguimiento. Por favor intenta de nuevo."
+        increment_agent_request_count("tracking", "error")
+
+    duration = time.time() - start_time
+    observe_agent_latency("tracking", duration)
     return {"raw_output": output}
 
 def handle_human(state: BotState) -> BotState:
+    start_time = time.time()
     user_message = state["messages"][-1].content
     session_id = state.get("session_id")
     context = state.get("context_summary", "")
-    output = human_tool._run(user_message, session_id=session_id, context_summary=context)
+
+    try:
+        output = human_tool._run(user_message, session_id=session_id, context_summary=context)
+        increment_agent_request_count("human", "success")
+    except Exception as e:
+        print(f"[ERROR] Human agent error: {e}")
+        output = "Lo siento, necesito transferirte con un agente humano. Por favor espera un momento."
+        increment_agent_request_count("human", "error")
+
+    duration = time.time() - start_time
+    observe_agent_latency("human", duration)
     return {"raw_output": output}
 
 # Nodo: Sintetizar respuesta
@@ -136,20 +217,23 @@ def guardrail(state: BotState) -> BotState:
     chain = GUARDRAIL_PROMPT | llm
     response = chain.invoke({"final_output": state["final_output"]})
     guarded_output = response.content.strip()
-    
+
     if guarded_output.startswith("APROBADO:"):
         # Extraer la respuesta original
         final_output = guarded_output.replace("APROBADO:", "").strip()
+        increment_guardrail_count("approved")
         print(f"[DEBUG] Guardrail passed: {final_output[:100]}...")
     elif guarded_output.startswith("RECHAZADO:"):
         # Usar la respuesta corregida o alternativa
         final_output = guarded_output.replace("RECHAZADO:", "").strip()
+        increment_guardrail_count("rejected")
         print(f"[DEBUG] Guardrail rejected and corrected: {final_output[:100]}...")
     else:
         # Fallback: asumir aprobado si no sigue el formato
         final_output = state["final_output"]
+        increment_guardrail_count("fallback")
         print(f"[DEBUG] Guardrail format unexpected, using original: {final_output[:100]}...")
-    
+
     return {"final_output": final_output}
 
 # Función de ruteo condicional
@@ -211,6 +295,20 @@ compiled_graph = graph.compile()
 # Función para invocar el grafo
 async def run_graph(session_id: str, user_text: str, provider=None, model=None, temperature=None, router_summary=None) -> str:
     try:
+        # Initialize central Langfuse client and obtain a callback handler
+        langfuse_callback = None
+        try:
+            try:
+                get_langfuse_client()
+            except Exception:
+                pass
+            try:
+                langfuse_callback = get_langfuse_callback_handler(session_id=session_id, user_id=None, trace_name="langgraph-orchestrator")
+            except Exception:
+                langfuse_callback = None
+        except Exception:
+            traceback.print_exc()
+
         # Obtener historial y añadir mensaje del usuario
         hist = get_message_history(session_id)
         try:
@@ -252,8 +350,13 @@ async def run_graph(session_id: str, user_text: str, provider=None, model=None, 
 
         print(f"[DEBUG] Initial state: {initial_state}")
 
-        # Ejecutar grafo
-        result = await compiled_graph.ainvoke(initial_state)
+        # Ejecutar grafo con callback si está disponible
+        if langfuse_callback:
+            # Configurar callbacks en el grafo compilado
+            result = await compiled_graph.ainvoke(initial_state, config={"callbacks": [langfuse_callback]})
+        else:
+            result = await compiled_graph.ainvoke(initial_state)
+
         print(f"[DEBUG] Graph result: {result}")
 
         # Guardar respuesta en historial

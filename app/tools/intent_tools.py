@@ -12,23 +12,29 @@ AGENT_PRODUCTS_URL = os.getenv("AGENT_PRODUCTS_URL", "http://agent_product:8000"
 AGENT_SALUDOS_URL = os.getenv("AGENT_SALUDOS_URL", "http://agent_saludos:8000")
 AGENT_PAGOS_URL = os.getenv("AGENT_PAGOS_URL", "http://agent_payment:8000")
 AGENT_OTROS_URL = os.getenv("AGENT_OTROS_URL", "http://agent_otros:8000")
+AGENT_PEDIDOS_URL = os.getenv("AGENT_PEDIDOS_URL", "http://agent_pedidos:8000")
+AGENT_PEDIDOS_MCP_URL = os.getenv("AGENT_PEDIDOS_MCP_URL", os.getenv("MCP_URL", "http://mcp-woo:8000/mcp"))
 
 class ProductsTool(BaseTool):
     name: str = "products_search"
     description: str = "Busca y consulta productos disponibles. Úsalo para preguntas sobre catálogo, precios o disponibilidad de productos."
 
     async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
-        payload = {"text": query}
+        # Include the MCP URL inside the text so the pedidos agent's LLM sees it,
+        # and also include the field for completeness.
+        payload = {"text": f"{query}\n\nMCP_URL: {AGENT_PEDIDOS_MCP_URL}", "mcp_url": AGENT_PEDIDOS_MCP_URL}
         if session_id:
             payload["session_id"] = session_id
         if context_summary:
             payload["context_summary"] = context_summary
+        # Do NOT send MCP API key from the orchestrator; the pedidos agent should
+        # read its own `MCP_API_KEY` from its environment for security.
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.post(
                     f"{AGENT_PRODUCTS_URL}/products_agent_search",
                     json=payload,
-                    timeout=10.0
+                    timeout=60.0
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -47,8 +53,24 @@ class OrdersTool(BaseTool):
     description: str = "Maneja pedidos y órdenes. Úsalo para crear, consultar o gestionar pedidos."
 
     async def _arun(self, query: str, session_id: str = None, context_summary: str = None) -> str:
-        # Placeholder: implementar lógica real para pedidos
-        return "Agente Pedidos: próximamente. Procesando consulta sobre pedidos."
+        payload = {"text": query}
+        if session_id:
+            payload["session_id"] = session_id
+        if context_summary:
+            payload["context_summary"] = context_summary
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(
+                    f"{AGENT_PEDIDOS_URL}/products_agent_search",
+                    json=payload,
+                    timeout=15.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("result", "No response from orders agent.")
+            except Exception as e:
+                print(f"[ERROR] Failed to connect to orders agent: {e}")
+                return f"Error conectando con agente pedidos: {e}"
 
     def _run(self, query: str, session_id: str = None, context_summary: str = None) -> str:
         import asyncio

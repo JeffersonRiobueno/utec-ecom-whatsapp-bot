@@ -1,6 +1,6 @@
 """Grafo de LangGraph para el bot de ecommerce con patrón Orquestador - Worker - Sintetizador y state persistente."""
 
-from typing import TypedDict, Annotated, Sequence, Any
+from typing import TypedDict, Annotated, Sequence, Any, Tuple
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
@@ -12,8 +12,7 @@ from app.metrics.prometheus_metrics import (
     increment_agent_request_count, observe_agent_latency,
     increment_intent_count, increment_guardrail_count
 )
-# Use central langfuse helpers for initialization and callback handler
-from app.metrics.langfuse_config import get_langfuse_callback_handler, get_langfuse_client
+from app.chatwoot_client import add_chatwoot_label
 import os
 import traceback
 import time
@@ -181,11 +180,18 @@ def handle_tracking(state: BotState) -> BotState:
     observe_agent_latency("tracking", duration)
     return {"raw_output": output}
 
-def handle_human(state: BotState) -> BotState:
+async def handle_human(state: BotState) -> BotState:
     start_time = time.time()
     user_message = state["messages"][-1].content
     session_id = state.get("session_id")
     context = state.get("context_summary", "")
+
+    # Ejecutar etiquetado en Chatwoot (side effect)
+    try:
+        if session_id:
+             await add_chatwoot_label(session_id, "human")
+    except Exception as e:
+        print(f"[WARN] Could not label conversation as human: {e}")
 
     try:
         output = human_tool._run(user_message, session_id=session_id, context_summary=context)
@@ -213,6 +219,13 @@ def synthesize(state: BotState) -> BotState:
 
 # Nodo: Guardrail de seguridad
 def guardrail(state: BotState) -> BotState:
+    # Allow bypassing the guardrail per-request via state flag or global env var
+    disabled_env = os.getenv("ORCHESTRATOR_GUARDRAIL_ENABLED", "true").lower() in ["0", "false", "no"]
+    if state.get("disable_guardrail") or disabled_env:
+        increment_guardrail_count("skipped")
+        print("[DEBUG] Guardrail disabled for this request; bypassing checks.")
+        return {"final_output": state["final_output"]}
+
     llm = state["llm"]
     chain = GUARDRAIL_PROMPT | llm
     response = chain.invoke({"final_output": state["final_output"]})
@@ -247,6 +260,7 @@ def route_intent(state: BotState) -> str:
         "saludo": "handle_greeting",
         "seguimiento": "handle_tracking",
         "humano": "handle_human",
+        "human": "handle_human",
     }
     return mapping.get(intent, "handle_knowledge")
 
@@ -293,21 +307,29 @@ graph.add_edge("guardrail", END)
 compiled_graph = graph.compile()
 
 # Función para invocar el grafo
-async def run_graph(session_id: str, user_text: str, provider=None, model=None, temperature=None, router_summary=None) -> str:
+async def run_graph(session_id: str, user_text: str, provider=None, model=None, temperature=None, router_summary=None, disable_guardrail: bool = False) -> Tuple[str, str]:
     try:
-        # Initialize central Langfuse client and obtain a callback handler
-        langfuse_callback = None
+        # INTEGRACIÓN MINIMALISTA LANGFUSE (PoC)
+        langfuse_handler = None
         try:
             try:
-                get_langfuse_client()
-            except Exception:
-                pass
+                from langfuse.callback import CallbackHandler
+            except ImportError:
+                from langfuse.langchain import CallbackHandler
+            
+            # Confiamos 100% en las variables de entorno (LANGFUSE_HOST, PUBLIC_KEY, SECRET_KEY)
+            print(f"[INFO] Inicializando Langfuse para sesión: {session_id}")
             try:
-                langfuse_callback = get_langfuse_callback_handler(session_id=session_id, user_id=None, trace_name="langgraph-orchestrator")
-            except Exception:
-                langfuse_callback = None
-        except Exception:
-            traceback.print_exc()
+                # SDK < 3.0.0 acepta session_id en constructor
+                langfuse_handler = CallbackHandler(session_id=session_id)
+            except Exception as e:
+                print(f"[WARN] Error init CallbackHandler con session_id: {e}. Probando sin args.")
+                langfuse_handler = CallbackHandler()
+
+            if hasattr(langfuse_handler, "auth_check"):
+                langfuse_handler.auth_check()
+        except Exception as e:
+            print(f"[WARN] Langfuse no disponible: {e}")
 
         # Obtener historial y añadir mensaje del usuario
         hist = get_message_history(session_id)
@@ -346,29 +368,36 @@ async def run_graph(session_id: str, user_text: str, provider=None, model=None, 
             "raw_output": "",
             "final_output": "",
             "llm": get_synthesizer_llm(provider, model, temperature),
+            # Per-request flag to disable guardrail
+            "disable_guardrail": bool(disable_guardrail),
         }
 
         print(f"[DEBUG] Initial state: {initial_state}")
 
-        # Ejecutar grafo con callback si está disponible
-        if langfuse_callback:
-            # Configurar callbacks en el grafo compilado
-            result = await compiled_graph.ainvoke(initial_state, config={"callbacks": [langfuse_callback]})
-        else:
-            result = await compiled_graph.ainvoke(initial_state)
+        # Ejecutar grafo
+        callbacks = [langfuse_handler] if langfuse_handler else []
+        result = await compiled_graph.ainvoke(initial_state, config={"callbacks": callbacks})
+
+        # FLUSH: Vital para asegurar envío de datos antes de terminar
+        if langfuse_handler:
+            try:
+               langfuse_handler.flush()
+            except Exception as e:
+               print(f"[WARN] Fallo al hacer flush de Langfuse: {e}")
 
         print(f"[DEBUG] Graph result: {result}")
 
         # Guardar respuesta en historial
         output = result.get("final_output", "Respuesta no disponible.")
+        intent = result.get("intent", "otro")
         try:
             hist.add_ai_message(output)
         except Exception:
             pass
 
-        return output
+        return output, intent
     except Exception as e:
         print(f"[ERROR] Exception in run_graph: {e}")
         import traceback
         traceback.print_exc()
-        return "Parece que hubo un problema al intentar conectar con el agente. Esto puede deberse a un error de red. Te recomiendo intentar de nuevo más tarde. Si el problema persiste, por favor contáctanos por otro medio. ¡Estamos aquí para ayudarte!"
+        return "Parece que hubo un problema al intentar conectar con el agente. Esto puede deberse a un error de red. Te recomiendo intentar de nuevo más tarde. Si el problema persiste, por favor contáctanos por otro medio. ¡Estamos aquí para ayudarte!", "error"

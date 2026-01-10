@@ -9,7 +9,34 @@ from app.graph import run_graph
 from app.llm_utils import make_llm, DEFAULT_PROVIDER, DEFAULT_MODEL, DEFAULT_TEMPERATURE
 from app.media_utils import preprocess_message
 from app.metrics.prometheus_metrics import get_metrics
+from fastapi import Query
+import httpx
 
+async def send_webhook_test(session_id: str, message: str, msg_type: str, user: Optional[str] = None) -> Optional[str]:
+    url = "https://NNNNNNNNNNNN.com/webhook/chatwood-bot"
+    data = {
+        "user": user or "unknown",
+        "mensaje": message,
+        "type": msg_type,
+        "conversation_id": session_id
+    }
+    try:
+        # Timeout un poco mayor para permitir lectura de respuesta
+        async with httpx.AsyncClient(timeout=3.0) as client:
+           resp = await client.post(url, json=data)
+           if resp.status_code == 200:
+               try:
+                   data_resp = resp.json()
+                   print(f"[DEBUG] Webhook response: {data_resp}")
+                   # Intenta capturar conversation_id o id de la respuesta
+                   # Priorizamos conversation_id si viene en la respuesta
+                   val = data_resp.get("conversation_id") or data_resp.get("id")
+                   return str(val) if val else None
+               except Exception as e:
+                   print(f"[WARN] Error parsing webhook json: {e}")
+    except Exception as e:
+        print(f"[WARN] Failed to send webhook data to {url}: {e}")
+    return None
 
 # =========================
 # Fábrica de LLMs
@@ -71,7 +98,8 @@ async def webhook(
     msg: WAIn,
     provider: Optional[str] = Query(None, description="Override provider: openai|ollama|gemini"),
     model: Optional[str] = Query(None, description="Override model name for the selected provider"),
-    temperature: Optional[float] = Query(None, description="Override temperature")
+    temperature: Optional[float] = Query(None, description="Override temperature"),
+    disable_guardrail: Optional[bool] = Query(False, description="Disable orchestrator guardrail for this request")
 ):
     """
     Permite override puntual del proveedor/modelo/temperature vía query params.
@@ -113,16 +141,53 @@ async def webhook(
     processed_text = preprocess_message(msg.text, msg.mimetype, msg.filename, runtime["provider"])
     print(f"[DEBUG] Processed text: {processed_text[:100]}...")
 
+    # Notificar Incoming (Usuario -> Agente)
+    # Iniciamos la tarea pero guardamos la referencia para esperar su resultado después
+    import asyncio
+    initial_webhook_task = None
+    try:
+         # Usamos msg.session_id inicialmente. Si el webhook devuelve un ID numérico (conversation_id), actualizaremos chatwood_id después.
+         initial_webhook_task = asyncio.create_task(send_webhook_test(msg.session_id, processed_text, "incoming", user=msg.session_id))
+    except Exception as e:
+         print(f"[WARN] Error dispatching incoming webhook: {e}")
+
     # Usar el grafo de LangGraph para manejar la intención y ejecutar la acción
     try:
-            output = await run_graph(msg.session_id, processed_text, runtime["provider"], runtime["model"], runtime["temperature"], runtime.get("router_summary"))
+            output, intent = await run_graph(
+                msg.session_id,
+                processed_text,
+                runtime["provider"],
+                runtime["model"],
+                runtime["temperature"],
+                runtime.get("router_summary"),
+                disable_guardrail=disable_guardrail,
+            )
     except Exception as e:
         print(f"[ERROR] Exception in webhook run_graph: {e}")
         import traceback
         traceback.print_exc()
         output = "Parece que hubo un problema al intentar conectar con el agente. Esto puede deberse a un error de red. Te recomiendo intentar de nuevo más tarde. Si el problema persiste, por favor contáctanos por otro medio. ¡Estamos aquí para ayudarte!"
+        intent = "error"
 
     runtime["router_summary"].save_context({"input": msg.text}, {"output": output})
+
+    # Recuperar conversation_id actualizado del webhook inicial (si existe)
+    chatwood_id = msg.session_id
+    if initial_webhook_task:
+        try:
+            # Esperamos a que termine el webhook inicial (ya debería haber terminado o estar cerca)
+            result_id = await initial_webhook_task
+            if result_id:
+                chatwood_id = str(result_id)
+                print(f"[DEBUG] Updated conversation_id from webhook: {chatwood_id}")
+        except Exception as e:
+            print(f"[WARN] Error awaiting initial webhook: {e}")
+
+    # Notificar Outgoing (Agente -> Usuario) usando el ID actualizado
+    try:
+         asyncio.create_task(send_webhook_test(chatwood_id, output, "outgoing"))
+    except Exception as e:
+         print(f"[WARN] Error dispatching outgoing webhook: {e}")
     
     # DEBUGs útiles
     print("[DEBUG] Provider:", runtime["provider"])
@@ -134,6 +199,7 @@ async def webhook(
         "model": runtime["model"],
         "reply": output,
         "top_history": top_history,
+        "conversation_id": chatwood_id,
     }
 
 @app.get("/debug/memory")

@@ -44,5 +44,5 @@ langgraph>=0.1.0
 # ============================
 # Observability and Monitoring
 # ============================
-langfuse==3.0.9
+langfuse>=2.0.0
 prometheus-client==0.20.0
